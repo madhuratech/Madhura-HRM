@@ -11,7 +11,8 @@ export function AddEmployeeModal({ isOpen, onClose, onSubmit }) {
  const handleFormSubmit = async (data) => {
     setIsSubmitting(true);
     try {
-      const response = await fetch('http://localhost:5000/api/employees', {
+      const API_URL = import.meta.env.MODE === 'development' ? 'http://localhost:5000/api/employees' : 'https://madhura-hrm.onrender.com/api/employees';
+      const response = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),

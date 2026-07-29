@@ -12,9 +12,8 @@ export function GeoPunch() {
 
 // Fetch All data
   const fetchRecent = async () => {
-    const res = await fetch(
-      `http://localhost:3000/api/attendance/recent/${EMPLOYEE_ID}`
-    );
+    const API_URL = import.meta.env.MODE === 'development' ? `http://localhost:5000/api/attendance/recent/${EMPLOYEE_ID}` : `https://madhura-hrm.onrender.com/api/attendance/recent/${EMPLOYEE_ID}`;
+    const res = await fetch(API_URL);
     const data = await res.json();
     setRecent(data);
   };
@@ -31,7 +30,8 @@ export function GeoPunch() {
     setTimeout(async () => {
       const location = { lat: 12.9716, lng: 77.5946 };
 
-      await fetch("http://localhost:3000/api/attendance/punch", {
+      const API_URL = import.meta.env.MODE === 'development' ? "http://localhost:5000/api/attendance/punch" : "https://madhura-hrm.onrender.com/api/attendance/punch";
+      await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
