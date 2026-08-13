@@ -1,0 +1,439 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { ChevronDown, Plus, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from 'recharts';
+import { useToast } from '../ui/Toast';
+
+export default function Reviews() {
+  const { addToast } = useToast();
+  const [reviewsList, setReviewsList] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  // Pagination & Filters
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 10;
+  const [search, setSearch] = useState('');
+  const [filterDept, setFilterDept] = useState('All Departments');
+
+  // KPI Dashboard Stats
+  const [kpiData, setKpiData] = useState({
+    total: 0,
+    completed: 0,
+    inProgress: 0,
+    pending: 0,
+    rate: '0%',
+    chartData: [
+      { name: 'Completed', value: 0, color: '#10B981' },
+      { name: 'In Progress', value: 0, color: '#2952E3' },
+      { name: 'Pending', value: 0, color: '#F59E0B' }
+    ]
+  });
+
+  const [formData, setFormData] = useState({
+    employee: '',
+    reviewPeriod: 'Q2 2024',
+    reviewer: '',
+    type: 'Manager Review',
+    overallRating: '5',
+    strengths: '',
+    improvement: '',
+    goals: '',
+    comments: '',
+    status: 'In Progress'
+  });
+
+  const getAuthToken = () => {
+    const auth = localStorage.getItem('hrms_auth');
+    if (auth) {
+      try {
+        const parsed = JSON.parse(auth);
+        return parsed.token || 'mock_jwt_token';
+      } catch (e) {
+        return 'mock_jwt_token';
+      }
+    }
+    return 'mock_jwt_token';
+  };
+
+  const fetchMeta = async () => {
+    try {
+      const headers = { 'Authorization': `Bearer ${getAuthToken()}` };
+      
+      // Fetch departments
+      const deptRes = await fetch('/app/requirements/meta/all', { headers });
+      const deptData = await deptRes.json();
+      if (deptData && deptData.departments) {
+        setDepartments(deptData.departments);
+      }
+
+      // Fetch employees
+      const empRes = await fetch('/app/employees?status=Active', { headers });
+      const empData = await empRes.json();
+      if (Array.isArray(empData)) {
+        setEmployees(empData);
+      }
+    } catch (err) {
+      console.error('Failed to load review metadata:', err);
+    }
+  };
+
+  const fetchDashboardStats = useCallback(async () => {
+    try {
+      const res = await fetch('/app/reviews/dashboard', {
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+      });
+      const resData = await res.json();
+      if (resData.success && resData.data) {
+        setKpiData(resData.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch dashboard stats:', err);
+    }
+  }, []);
+
+  const fetchReviews = useCallback(async () => {
+    setLoading(true);
+    try {
+      let url = `/app/reviews?page=${page}&limit=${limit}`;
+      if (search) {
+        url += `&search=${encodeURIComponent(search)}`;
+      }
+      if (filterDept && filterDept !== 'All Departments') {
+        url += `&department_id=${encodeURIComponent(filterDept)}`;
+      }
+
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+      });
+      const resData = await res.json();
+      if (resData.success && resData.data) {
+        setReviewsList(resData.data.reviews || []);
+        setTotal(resData.data.total || 0);
+      } else {
+        addToast(resData.message || 'Failed to fetch reviews', 'error');
+      }
+    } catch (err) {
+      addToast('Error connecting to backend server', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search, filterDept, addToast]);
+
+  useEffect(() => {
+    fetchMeta();
+  }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterDept]);
+
+  useEffect(() => {
+    fetchReviews();
+    fetchDashboardStats();
+  }, [page, fetchReviews, fetchDashboardStats]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!formData.employee || !formData.reviewer || !formData.reviewPeriod) {
+      addToast('Please fill in all required fields.', 'error');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const payload = {
+        employee_id: parseInt(formData.employee),
+        review_period: formData.reviewPeriod,
+        reviewer_id: formData.reviewer.trim(),
+        type: formData.type,
+        overall_rating: formData.overallRating,
+        strengths: formData.strengths.trim(),
+        improvement: formData.improvement.trim(),
+        goals: formData.goals.trim(),
+        comments: formData.comments.trim(),
+        status: formData.status
+      };
+
+      const res = await fetch('/app/reviews', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getAuthToken()}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const resData = await res.json();
+      if (resData.success) {
+        addToast('Review submitted successfully!', 'success');
+        setShowAddModal(false);
+        setFormData({ employee: '', reviewPeriod: 'Q2 2024', reviewer: '', type: 'Manager Review', overallRating: '5', strengths: '', improvement: '', goals: '', comments: '', status: 'In Progress' });
+        fetchReviews();
+        fetchDashboardStats();
+      } else {
+        addToast(resData.message || 'Failed to submit review', 'error');
+      }
+    } catch (err) {
+      addToast('Connection error occurred', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const getStatusStyle = (status) => {
+    switch (status) {
+      case 'Completed': return { bg: '#DCFCE7', color: '#15803D' };
+      case 'In Progress': return { bg: '#FEF3C7', color: '#D97706' };
+      default: return { bg: '#F3F4F6', color: '#6B7280' };
+    }
+  };
+
+  const cardStyle = {
+    background: '#FFFFFF',
+    borderRadius: '16px',
+    padding: '24px',
+    boxShadow: '0 8px 24px rgba(15,23,42,0.08)',
+  };
+
+  const totalPages = Math.ceil(total / limit) || 1;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', fontFamily: '"Inter", sans-serif', paddingBottom: '24px' }}>
+      
+      {/* Add Review Modal */}
+      {showAddModal && (
+        <>
+          <div className="modal-backdrop-blur" onClick={() => setShowAddModal(false)} />
+          <div className="modal-centered-content" style={{ width: '1100px', maxWidth: '90vw', maxHeight: '90vh' }}>
+            <div className="p-6 border-b border-slate-200 flex items-center justify-between shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-[#0A1629]">Add Performance Review</h2>
+                <p className="text-sm text-slate-500 mt-1">Submit official manager or peer reviews.</p>
+              </div>
+              <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                <X size={20} className="text-slate-400" />
+              </button>
+            </div>
+            <form onSubmit={handleSave} className="p-6 overflow-y-auto flex-1 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Employee <span className="text-red-500">*</span></label>
+                  <select 
+                    required 
+                    value={formData.employee} 
+                    onChange={e => setFormData({ ...formData, employee: e.target.value })} 
+                    className="w-full h-12 px-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                  >
+                    <option value="">Select Employee</option>
+                    {employees.map(e => (
+                      <option key={e.id} value={e.id}>{e.name} (EMP{String(e.id).padStart(3, '0')})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Review Period <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formData.reviewPeriod} onChange={e => setFormData({ ...formData, reviewPeriod: e.target.value })} placeholder="e.g. Q2 2024" className="w-full h-12 px-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Reviewer Name <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formData.reviewer} onChange={e => setFormData({ ...formData, reviewer: e.target.value })} placeholder="e.g. Arjun Mehta (HR)" className="w-full h-12 px-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Review Type</label>
+                  <select value={formData.type} onChange={e => setFormData({ ...formData, type: e.target.value })} className="w-full h-12 px-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white">
+                    <option value="Manager Review">Manager Review</option>
+                    <option value="Peer Review">Peer Review</option>
+                    <option value="Self Evaluation">Self Evaluation</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Overall Rating (1 to 5)</label>
+                  <select value={formData.overallRating} onChange={e => setFormData({ ...formData, overallRating: e.target.value })} className="w-full h-12 px-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white">
+                    <option value="5">5 - Exceptional</option>
+                    <option value="4">4 - Exceeds Expectations</option>
+                    <option value="3">3 - Satisfactory</option>
+                    <option value="2">2 - Needs Improvement</option>
+                    <option value="1">1 - Unsatisfactory</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Status</label>
+                  <select value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value })} className="w-full h-12 px-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white">
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Pending">Pending</option>
+                  </select>
+                </div>
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Strengths</label>
+                  <textarea value={formData.strengths} onChange={e => setFormData({ ...formData, strengths: e.target.value })} placeholder="Top employee performance strengths..." style={{ height: '70px' }} className="w-full p-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none" />
+                </div>
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Areas of Improvement</label>
+                  <textarea value={formData.improvement} onChange={e => setFormData({ ...formData, improvement: e.target.value })} placeholder="Feedback on improvements..." style={{ height: '70px' }} className="w-full p-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none" />
+                </div>
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Comments & Details</label>
+                  <textarea value={formData.comments} onChange={e => setFormData({ ...formData, comments: e.target.value })} placeholder="General feedback remarks..." style={{ height: '70px' }} className="w-full p-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none" />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-4 pt-6 border-t border-slate-200 shrink-0">
+                <button type="button" onClick={() => setShowAddModal(false)} className="px-8 h-12 border border-slate-200 rounded-xl text-base font-semibold text-slate-700 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" disabled={submitting} className="px-8 h-12 bg-blue-600 text-white rounded-xl text-base font-semibold hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50">
+                  {submitting ? 'Saving...' : 'Save Review'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>Reviews</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>Manage performance reviews</p>
+        </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <select 
+            value={filterDept} 
+            onChange={e => setFilterDept(e.target.value)} 
+            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #E2E8F0', background: '#FFF', fontSize: '13px', color: '#334155', cursor: 'pointer' }}
+          >
+            <option value="All Departments">All Departments</option>
+            {departments.map(d => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+          <button onClick={() => setShowAddModal(true)} style={{ padding: '10px 20px', borderRadius: '8px', border: 'none', background: '#2952E3', color: '#FFF', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}>
+            <Plus size={16} /> Add Review
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>
+        {[
+          { title: 'Total Reviews', value: kpiData.total, icon: <ChevronDown size={20} color="#2952E3" />, bgColor: '#EFF6FF' },
+          { title: 'Completed Reviews', value: kpiData.completed, icon: <ChevronDown size={20} color="#10B981" />, bgColor: '#ECFDF5' },
+          { title: 'Completion Rate', value: kpiData.rate, icon: <ChevronDown size={20} color="#8B5CF6" />, bgColor: '#F5F3FF' },
+          { title: 'Pending Reviews', value: kpiData.pending, icon: <ChevronDown size={20} color="#F59E0B" />, bgColor: '#FFFBEB' },
+        ].map((kpi, idx) => (
+          <div key={idx} style={{ ...cardStyle, display: 'flex', gap: '16px', padding: '20px', alignItems: 'center' }}>
+            <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: kpi.bgColor, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {kpi.icon}
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', marginBottom: '4px' }}>{kpi.title}</div>
+              <div style={{ fontSize: '24px', color: '#1E293B', fontWeight: '700' }}>{kpi.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Main Content Layout */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1fr', gap: '24px' }}>
+        
+        {/* Table */}
+        <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid #F1F5F9' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#1E293B' }}>Review Tracker</h3>
+            <input 
+              type="text" 
+              placeholder="Search..." 
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #E2E8F0', outline: 'none', fontSize: '13px' }}
+            />
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            {loading ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>Loading reviews...</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ background: '#F8FAFC' }}>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: '600', color: '#64748B', borderBottom: '1px solid #F1F5F9' }}>Employee</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: '600', color: '#64748B', borderBottom: '1px solid #F1F5F9' }}>Review Period</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: '600', color: '#64748B', borderBottom: '1px solid #F1F5F9' }}>Reviewer</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: '600', color: '#64748B', borderBottom: '1px solid #F1F5F9' }}>Type</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: '600', color: '#64748B', borderBottom: '1px solid #F1F5F9', textAlign: 'center' }}>Rating</th>
+                    <th style={{ padding: '16px 24px', fontSize: '12px', fontWeight: '600', color: '#64748B', borderBottom: '1px solid #F1F5F9', textAlign: 'center' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reviewsList.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>No reviews tracked</td>
+                    </tr>
+                  ) : (
+                    reviewsList.map((row, idx) => (
+                      <tr key={row.id} style={{ borderBottom: idx === reviewsList.length - 1 ? 'none' : '1px solid #F8FAFC' }}>
+                        <td style={{ padding: '16px 24px', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '600', color: '#475569' }}>
+                              {row.employee_name ? row.employee_name.split(' ').map(n => n[0]).join('') : 'EV'}
+                            </div>
+                            <div style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B' }}>{row.employee_name}</div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '16px 24px', fontSize: '13px', color: '#475569' }}>{row.review_period}</td>
+                        <td style={{ padding: '16px 24px', fontSize: '13px', color: '#475569' }}>{row.reviewer_id}</td>
+                        <td style={{ padding: '16px 24px', fontSize: '13px', color: '#475569' }}>{row.type}</td>
+                        <td style={{ padding: '16px 24px', fontSize: '13px', color: '#1E293B', fontWeight: '600', textAlign: 'center' }}>{row.overall_rating} ★</td>
+                        <td style={{ padding: '16px 24px', textAlign: 'center' }}>
+                          <span style={{ 
+                            padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600',
+                            backgroundColor: getStatusStyle(row.status).bg, color: getStatusStyle(row.status).color
+                          }}>
+                            {row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderTop: '1px solid #F1F5F9' }}>
+            <div style={{ fontSize: '13px', color: '#64748B' }}>
+              Showing {total === 0 ? 0 : (page - 1) * limit + 1} to {Math.min(page * limit, total)} of {total} entries
+            </div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button disabled={page === 1} onClick={() => setPage(prev => prev - 1)} style={{ padding: '4px 8px', border: '1px solid #E2E8F0', borderRadius: '6px', background: '#FFF', cursor: page === 1 ? 'not-allowed' : 'pointer' }}><ChevronLeft size={16} /></button>
+              <button disabled={page === totalPages} onClick={() => setPage(prev => prev + 1)} style={{ padding: '4px 8px', border: '1px solid #E2E8F0', borderRadius: '6px', background: '#FFF', cursor: page === totalPages ? 'not-allowed' : 'pointer' }}><ChevronRight size={16} /></button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Side Charts */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={cardStyle}>
+            <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: '600', color: '#1E293B' }}>Review Status</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '140px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={kpiData.chartData} innerRadius={40} outerRadius={55} paddingAngle={2} dataKey="value" cx="50%" cy="50%" stroke="none">
+                    {kpiData.chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                    <Label value={kpiData.total} position="center" fill="#1E293B" style={{ fontSize: '24px', fontWeight: '700' }} />
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
